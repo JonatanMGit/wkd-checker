@@ -10,6 +10,7 @@ export interface KeyCheckResult {
     key_available: boolean;
     keyCorsValid: boolean;
     keyType: KeyType;
+    keyTypeValid: boolean;
     fingerprint: string | null;
     emailInKey: boolean;
     valid: boolean;
@@ -104,6 +105,7 @@ const checkKeyUrl = async (url: string, policy: string, options: RequestInit, em
         key_available: !!keyData.response,
         keyCorsValid: keyData.corsValid,
         keyType: KeyType.Invalid,
+        keyTypeValid: false,
         fingerprint: null,
         emailInKey: false,
         valid: false,
@@ -112,7 +114,7 @@ const checkKeyUrl = async (url: string, policy: string, options: RequestInit, em
     if (keyData.response) {
         const { keyType, key } = await detectKeyType(keyData.response);
         result.keyType = keyType;
-        result.valid = keyType !== KeyType.Invalid;
+        result.keyTypeValid = keyType === KeyType.BinaryKey;
 
         if (key) {
             const identities = await key.getUserIDs();
@@ -121,7 +123,10 @@ const checkKeyUrl = async (url: string, policy: string, options: RequestInit, em
         }
     }
 
+    result.valid = result.policyAvailable && result.policyCorsValid && result.key_available && result.keyCorsValid && result.keyTypeValid && result.emailInKey;
+
     return result;
+
 };
 
 /**
