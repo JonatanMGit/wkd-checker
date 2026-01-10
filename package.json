@@ -1,10 +1,18 @@
 {
+  "name": "wkd-checker",
+  "version": "1.0.0",
+  "description": "Web Key Directory library for Node.js. Retreive OpenPGP keys from WKD servers and validate them.",
+  "author": "Jonatan Miarecki",
+  "license": "MIT",
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20240312.0",
     "typescript": "^5.4.2"
   },
   "dependencies": {
-    "openpgp": "^5.11.1",
-    "zbase32": "^2.0.3"
-  }
+    "openpgp": "^6.3.0"
+  },
+  "scripts": {
+    "build": "tsc"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts"
 }

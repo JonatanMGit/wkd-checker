@@ -1,1 +1,25 @@
-Cloudflare Worker to validate Web Key Discovery (WKD) for OpenPGP keyservers.
+# WKD Checker
+A Node.js library for retrieving and validating OpenPGP keys from Web Key Directory (WKD) servers.
+
+## Example Usage
+
+```js
+const wkd = require('wkd-checker');
+
+const email = 'test@example.com';
+
+wkd.checkKey(email)
+    .then(result => {
+        console.log('WKD Result:', result);
+        console.log('Advanced:', result.advanced.valid);
+        console.log('Direct:', result.direct.valid);
+    })
+
+wkd.getKey(email)
+    .then(key => {
+        console.log('Retrieved Key:\n', key);
+    })
+    .catch(err => {
+        console.error('Error retrieving key:', err);
+    });
+```

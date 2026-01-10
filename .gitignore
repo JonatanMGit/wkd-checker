@@ -133,3 +133,5 @@ dist
 
 # Distribution directory
 dist/
+
+package-lock.json
