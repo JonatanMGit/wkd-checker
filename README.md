@@ -23,3 +23,9 @@ wkd.getKey(email)
         console.error('Error retrieving key:', err);
     });
 ```
+
+or using the CLI:
+
+```bash
+npx wkd-checker test@example.com
+```
