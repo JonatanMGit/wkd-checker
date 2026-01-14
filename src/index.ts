@@ -34,6 +34,7 @@ export class WKDError extends Error {
 
 
 const EMAIL_REGEX = /^[^@]+@[^@]+\.[^@]+$/;
+const USER_AGENT = "WKD-Checker (+https://www.npmjs.com/package/wkd-checker)";
 
 /**
  * Validates an email address format.
@@ -204,7 +205,7 @@ export const getKey = async (email: string): Promise<Uint8Array> => {
 
     for (const url of urls) {
         try {
-            const response = await fetch(url);
+            const response = await fetch(url, { headers: { 'User-Agent': USER_AGENT } });
             if (response.ok) {
                 return new Uint8Array(await response.arrayBuffer());
             }
@@ -225,7 +226,7 @@ export const checkKey = async (email: string): Promise<{ advanced: KeyCheckResul
     const { advancedUrl, directUrl, advancedPolicyUrl, directPolicyUrl } = await generateWkdUrls(email);
 
     const options: RequestInit = {
-        headers: { "User-Agent": "WKD-Checker (+https://miarecki.eu/posts/web-key-directory-setup/)" }
+        headers: { "User-Agent": USER_AGENT }
     };
 
     const [advancedResult, directResult] = await Promise.all([

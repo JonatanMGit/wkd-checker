@@ -1,10 +1,21 @@
 {
   "name": "wkd-checker",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Web Key Directory library for Node.js. Retreive OpenPGP keys from WKD servers and validate them.",
   "repository": {
     "type": "git",
-    "url": "https://github.com/JonatanMGit/wkd-checker.git"
+    "url": "git+https://github.com/JonatanMGit/wkd-checker.git"
+  },
+  "keywords": [
+    "wkd",
+    "openpgp",
+    "pgp",
+    "gpg",
+    "keyserver"
+  ],
+  "homepage": "https://miarecki.eu/tools/wkd-checker/",
+  "bugs": {
+    "url": "https://github.com/JonatanMGit/wkd-checker/issues"
   },
   "bin": {
     "wkd-checker": "dist/cli.js"
