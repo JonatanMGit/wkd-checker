@@ -32,6 +32,7 @@ const printSection = (title: string, result: KeyCheckResult) => {
     console.log(`\n${BOLD}${title}${RESET} ${statusBadge}`);
     console.log(`${DIM}------------------------------------------------------------${RESET}`);
 
+    console.log(`Policy Location:    ${CYAN}${result.policy_location}${RESET}`);
     console.log(`Policy Available:   ${formatBoolean(result.policyAvailable)}`);
     console.log(`Policy CORS Valid:  ${formatBoolean(result.policyCorsValid)}`);
 

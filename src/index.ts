@@ -4,6 +4,7 @@ import { Key, readKey } from 'openpgp';
  * Result of a key check operation.
  */
 export interface KeyCheckResult {
+    policy_location: string;
     policyAvailable: boolean;
     policyCorsValid: boolean;
     key_location: string | null;
@@ -52,6 +53,8 @@ export const validateEmail = (email: string): boolean => EMAIL_REGEX.test(email)
 const fetchWithCorsCheck = async (url: string, options: RequestInit): Promise<{ response: Response | null, corsValid: boolean }> => {
     try {
         const response = await fetch(url, options);
+
+        // Spec does not mandate CORS, but it is beneficial for web clients (e.g. webmail usage). Not factored into validity.
         const corsValid = response.headers.get("access-control-allow-origin") === "*";
         return { response: response.ok ? response : null, corsValid };
     } catch {
@@ -72,11 +75,13 @@ const detectKeyType = async (keyData: Response): Promise<{ keyType: KeyType, key
         const header = "-----BEGIN PGP PUBLIC KEY BLOCK-----";
         const prefix = new TextDecoder().decode(binaryKey.slice(0, header.length));
 
+        // Spec Section 3.1: "The server SHOULD use "application/octet-stream" as the Content-Type for the data but clients SHOULD also accept any other Content-Type. The server SHOULD NOT return an ASCII armored version of the key."
         if (prefix === header) {
             const text = new TextDecoder().decode(binaryKey);
             const key = await readKey({ armoredKey: text });
             return { keyType: KeyType.ArmoredKey, key };
         } else {
+            // Spec Section 3.1: "The HTTP GET method MUST return the binary representation of the OpenPGP key for the given mail address."
             const key = await readKey({ binaryKey });
             return { keyType: KeyType.BinaryKey, key };
         }
@@ -100,6 +105,7 @@ const checkKeyUrl = async (url: string, policy: string, options: RequestInit, em
     ]);
 
     const result: KeyCheckResult = {
+        policy_location: policyData.response?.url || policy,
         policyAvailable: !!policyData.response,
         policyCorsValid: policyData.corsValid,
         key_location: keyData.response?.url || url,
@@ -115,16 +121,34 @@ const checkKeyUrl = async (url: string, policy: string, options: RequestInit, em
     if (keyData.response) {
         const { keyType, key } = await detectKeyType(keyData.response);
         result.keyType = keyType;
-        result.keyTypeValid = keyType === KeyType.BinaryKey;
+
+        // The HTTP GET method MUST return the binary representation of the OpenPGP key for the given mail address.
+        result.keyTypeValid = keyType === KeyType.BinaryKey
 
         if (key) {
             const identities = await key.getUserIDs();
-            result.emailInKey = identities.some(identity => identity.includes(email));
+
+            // Spec Section 5: "The mail provider MUST make sure to publish a key in a way that only the mail address belonging to the requested user is part of the User ID packets included in the returned key."
+            // "Other User ID packets and their associated binding signatures MUST be removed before publication."
+            if (identities.length === 1) {
+                const id = identities[0];
+                // robustly extract email from "Name <email>" format
+                const match = id.match(/<(.+)>/);
+                const emailInId = match ? match[1] : id;
+
+                result.emailInKey = emailInId.trim() === email;
+            } else {
+                result.emailInKey = false;
+            }
+
             result.fingerprint = key.getFingerprint().toUpperCase();
         }
     }
 
-    result.valid = result.policyAvailable && result.policyCorsValid && result.key_available && result.keyCorsValid && result.keyTypeValid && result.emailInKey;
+    result.valid = result.policyAvailable &&
+        result.key_available &&
+        result.keyTypeValid &&
+        result.emailInKey;
 
     return result;
 
@@ -132,6 +156,8 @@ const checkKeyUrl = async (url: string, policy: string, options: RequestInit, em
 
 /**
  * Encode input using Z-Base32 encoding.
+ * 
+ * Spec Section 3.1: "The resulting 160 bit digest is encoded using the Z-Base-32 method as described in [RFC6189], section 5.1.6."
  *
  * @param {Uint8Array} data - The binary data to encode
  * @returns {String} Binary data encoded using Z-Base32.
@@ -167,25 +193,31 @@ function zbase32Encode(data: Uint8Array): string {
 
 /**
  * Generates WKD URLs for a given email address.
+ * Spec Section 3.1: "Key Discovery"
  * @param {string} email - The email address.
  * @returns {Promise<{ advancedUrl: string, directUrl: string, advancedPolicyUrl: string, directPolicyUrl: string }>} The generated URLs.
  */
 const generateWkdUrls = async (email: string) => {
     const [localPart, domain] = email.split('@');
 
-    // Spec Requirement: map uppercase ASCII to lowercase. Non-ASCII are not changed.
+    // Spec Section 3.1: "all upper-case ASCII characters in a User ID are mapped to lowercase. Non-ASCII characters are not changed."
     const localPartHashInput = localPart.replace(/[A-Z]/g, c => c.toLowerCase());
     const domainLower = domain.toLowerCase();
 
+    // Spec Section 3.1: "The so mapped local-part is hashed using the SHA-1 algorithm."
     const hashBuffer = await crypto.subtle.digest("SHA-1", new TextEncoder().encode(localPartHashInput));
 
+    // Spec Section 3.1: "The resulting 160 bit digest is encoded using the Z-Base-32 method as described in [RFC6189], section 5.1.6.  The resulting string has a fixed length of 32 octets."
     const hash = zbase32Encode(new Uint8Array(hashBuffer));
     const nameParam = encodeURIComponent(localPart);
 
     return {
+        // Spec Section 3.1: Advanced Method URI Construction
         advancedUrl: `https://openpgpkey.${domainLower}/.well-known/openpgpkey/${domainLower}/hu/${hash}?l=${nameParam}`,
+        // Spec Section 3.1: Direct Method URI Construction
         directUrl: `https://${domainLower}/.well-known/openpgpkey/hu/${hash}?l=${nameParam}`,
-        advancedPolicyUrl: `https://openpgpkey.${domainLower}/.well-known/openpgpkey/policy`,
+        // Spec Section 4.5: Policy Flags
+        advancedPolicyUrl: `https://openpgpkey.${domainLower}/.well-known/openpgpkey/${domainLower}/policy`,
         directPolicyUrl: `https://${domainLower}/.well-known/openpgpkey/policy`
     };
 }
@@ -201,12 +233,14 @@ export const getKey = async (email: string): Promise<Uint8Array> => {
     }
 
     const { advancedUrl, directUrl } = await generateWkdUrls(email);
+    // Spec Section 3.1: "Implementations MUST first try the advanced method. Only if an address for the required sub-domain does not exist, they SHOULD fall back to the direct method."
     const urls = [advancedUrl, directUrl];
 
     for (const url of urls) {
         try {
             const response = await fetch(url, { headers: { 'User-Agent': USER_AGENT } });
             if (response.ok) {
+                // Spec Section 3.1
                 return new Uint8Array(await response.arrayBuffer());
             }
         } catch {
