@@ -14,6 +14,8 @@ export interface KeyCheckResult {
     keyTypeValid: boolean;
     fingerprint: string | null;
     emailInKey: boolean;
+    expired: boolean;
+    revoked: boolean;
     valid: boolean;
 }
 
@@ -115,6 +117,8 @@ const checkKeyUrl = async (url: string, policy: string, options: RequestInit, em
         keyTypeValid: false,
         fingerprint: null,
         emailInKey: false,
+        expired: false,
+        revoked: false,
         valid: false,
     };
 
@@ -142,6 +146,13 @@ const checkKeyUrl = async (url: string, policy: string, options: RequestInit, em
             }
 
             result.fingerprint = key.getFingerprint().toUpperCase();
+
+            const expirationTime = await key.getExpirationTime();
+            if (expirationTime !== Infinity && expirationTime !== null) {
+                result.expired = expirationTime < new Date();
+            }
+
+            result.revoked = await key.isRevoked();
         }
     }
 

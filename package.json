@@ -1,6 +1,6 @@
 {
   "name": "wkd-checker",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Web Key Directory library for Node.js. Retreive OpenPGP keys from WKD servers and validate them.",
   "repository": {
     "type": "git",
@@ -24,6 +24,8 @@
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^25.0.6",
+    "nock": "^14.0.10",
+    "tsx": "^4.21.0",
     "typescript": "^5.4.2"
   },
   "dependencies": {
@@ -31,7 +33,8 @@
   },
   "scripts": {
     "build": "tsc",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "test": "node --import tsx --test \"tests/**/*.test.ts\""
   },
   "files": [
     "dist"
