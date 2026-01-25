@@ -134,15 +134,14 @@ const checkKeyUrl = async (url: string, policy: string, options: RequestInit, em
 
             // Spec Section 5: "The mail provider MUST make sure to publish a key in a way that only the mail address belonging to the requested user is part of the User ID packets included in the returned key."
             // "Other User ID packets and their associated binding signatures MUST be removed before publication."
-            if (identities.length === 1) {
-                const id = identities[0];
-                // robustly extract email from "Name <email>" format
+            result.emailInKey = identities.length > 0;
+            for (const id of identities) {
                 const match = id.match(/<(.+)>/);
                 const emailInId = match ? match[1] : id;
-
-                result.emailInKey = emailInId.trim() === email;
-            } else {
-                result.emailInKey = false;
+                if (emailInId.trim() !== email) {
+                    result.emailInKey = false;
+                    break;
+                }
             }
 
             result.fingerprint = key.getFingerprint().toUpperCase();
