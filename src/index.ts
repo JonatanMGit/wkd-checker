@@ -7,6 +7,7 @@ export interface KeyCheckResult {
     policy_location: string;
     policyAvailable: boolean;
     policyCorsValid: boolean;
+    policy: PolicyFlags | null;
     key_location: string | null;
     key_available: boolean;
     keyCorsValid: boolean;
@@ -16,6 +17,7 @@ export interface KeyCheckResult {
     emailInKey: boolean;
     expired: boolean;
     revoked: boolean;
+    policyCompliant: boolean;
     valid: boolean;
 }
 
@@ -26,6 +28,19 @@ export enum KeyType {
     Invalid = 'Invalid',
     BinaryKey = 'BinaryKey',
     ArmoredKey = 'ArmoredKey',
+}
+
+
+/**
+ * Result of the policy file check.
+ */
+export interface PolicyFlags {
+    mailboxOnly: boolean;
+    daneOnly: boolean;
+    authSubmit: boolean;
+    protocolVersion: number | null;
+    submissionAddress: string | null;
+    others: Array<{ key: string, value: string | null }>;
 }
 
 export class WKDError extends Error {
@@ -93,6 +108,65 @@ const detectKeyType = async (keyData: Response): Promise<{ keyType: KeyType, key
 }
 
 /**
+ * Parses the Policy Flags file.
+ * Section 4.5. Policy Flags
+ * @param {string} text - Content of the policy file.
+ * @returns {PolicyFlags} Parsed policy flags.
+ */
+const parsePolicy = (text: string): PolicyFlags => {
+    const flags: PolicyFlags = {
+        mailboxOnly: false,
+        daneOnly: false,
+        authSubmit: false,
+        protocolVersion: null,
+        submissionAddress: null,
+        others: []
+    };
+
+    if (!text) return flags;
+
+    const lines = text.split(/\r?\n/);
+    for (const line of lines) {
+        const trimmed = line.trim();
+        // "Empty lines and lines starting with a '#' character are considered comment lines."
+        if (!trimmed || trimmed.startsWith('#')) continue;
+
+        const colonIndex = trimmed.indexOf(':');
+        let key = '';
+        let value: string | null = null;
+
+        if (colonIndex !== -1) {
+            key = trimmed.substring(0, colonIndex).trim().toLowerCase();
+            value = trimmed.substring(colonIndex + 1).trim();
+        } else {
+            key = trimmed.trim().toLowerCase();
+        }
+
+        switch (key) {
+            case 'mailbox-only':
+                flags.mailboxOnly = true;
+                break;
+            case 'dane-only':
+                flags.daneOnly = true;
+                break;
+            case 'auth-submit':
+                flags.authSubmit = true;
+                break;
+            case 'protocol-version':
+                if (value) flags.protocolVersion = parseInt(value, 10);
+                break;
+            case 'submission-address':
+                if (value) flags.submissionAddress = value;
+                break;
+            default:
+                // "For experimental use of new features or for provider specific settings, keywords MUST be prefixed with a domain name and an underscore."
+                flags.others.push({ key, value });
+        }
+    }
+    return flags;
+};
+
+/**
  * Checks for a key at a specific WKD URL.
  * @param {string} url - The WKD URL for the key.
  * @param {string} policy - The policy URL.
@@ -106,10 +180,21 @@ const checkKeyUrl = async (url: string, policy: string, options: RequestInit, em
         fetchWithCorsCheck(url, options)
     ]);
 
+    let policyFlags: PolicyFlags | null = null;
+    if (policyData.response) {
+        try {
+            const policyText = await policyData.response.text();
+            policyFlags = parsePolicy(policyText);
+        } catch {
+            policyFlags = parsePolicy("");
+        }
+    }
+
     const result: KeyCheckResult = {
         policy_location: policyData.response?.url || policy,
         policyAvailable: !!policyData.response,
         policyCorsValid: policyData.corsValid,
+        policy: policyFlags,
         key_location: keyData.response?.url || url,
         key_available: !!keyData.response,
         keyCorsValid: keyData.corsValid,
@@ -119,6 +204,7 @@ const checkKeyUrl = async (url: string, policy: string, options: RequestInit, em
         emailInKey: false,
         expired: false,
         revoked: false,
+        policyCompliant: true,
         valid: false,
     };
 
@@ -144,6 +230,20 @@ const checkKeyUrl = async (url: string, policy: string, options: RequestInit, em
                 }
             }
 
+            // Check policy compliance
+            if (result.policy?.mailboxOnly && identities.length > 0) {
+                for (const id of identities) {
+                    // If mailbox-only, the ID MUST 
+                    const match = id.match(/<(.+)>/);
+                    const emailInId = match ? match[1] : id;
+                    const expected = [`<${emailInId.trim()}>`, emailInId.trim()];
+
+                    if (!expected.includes(id.trim())) {
+                        result.policyCompliant = false;
+                    }
+                }
+            }
+
             result.fingerprint = key.getFingerprint().toUpperCase();
 
             const expirationTime = await key.getExpirationTime();
@@ -158,7 +258,8 @@ const checkKeyUrl = async (url: string, policy: string, options: RequestInit, em
     result.valid = result.policyAvailable &&
         result.key_available &&
         result.keyTypeValid &&
-        result.emailInKey;
+        result.emailInKey &&
+        result.policyCompliant;
 
     return result;
 

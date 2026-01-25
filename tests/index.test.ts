@@ -3,6 +3,7 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
 import nock from 'nock';
+import * as openpgp from 'openpgp';
 
 import { checkKey, getKey, KeyType } from '../src';
 
@@ -244,6 +245,84 @@ describe('WKD Checker', () => {
 
             assert.strictEqual(result.direct.valid, true, 'Direct result should be valid');
             assert.strictEqual(result.direct.keyType, KeyType.BinaryKey);
+        });
+
+        it('should fail policy check if mailbox-only policy is set but key has User Name', async () => {
+            const email = 'valid@example.localhost';
+            const hash = HASHES[email as keyof typeof HASHES];
+            const keyBuffer = readKeyFile('valid.bin');
+
+            // Policy with mailbox-only
+            nock(`https://${DOMAIN}`)
+                .get(`/.well-known/openpgpkey/policy`)
+                .reply(200, 'mailbox-only\n')
+                .get(`/.well-known/openpgpkey/hu/${hash}`)
+                .query(true) // match l=...
+                .reply(200, keyBuffer, { 'Content-Type': 'application/octet-stream' });
+
+            // Advanced fail
+            nock(`https://${ADVANCED_DOMAIN}`).get(/.*/).query(true).reply(404);
+
+            const result = await checkKey(email);
+
+            assert.strictEqual(result.direct.valid, false, 'Should be invalid due to policy');
+            assert.strictEqual(result.direct.policyCompliant, false, 'Policy compliant should be false');
+            assert.strictEqual(result.direct.policy?.mailboxOnly, true, 'mailbox-only flag should be set');
+        });
+
+        it('should pass policy check if mailbox-only policy is set and key has no User Name', async () => {
+            // Generate key on fly
+            const email = 'mailboxonly@example.localhost';
+
+            const { publicKey } = await openpgp.generateKey({
+                userIDs: [{ email }], // No name
+                format: 'binary'
+            });
+
+            nock(`https://${DOMAIN}`)
+                .get(`/.well-known/openpgpkey/policy`)
+                .reply(200, 'mailbox-only\n')
+                .get(/\/hu\/.*/)
+                .query(true)
+                .reply(200, Buffer.from(publicKey));
+
+            nock(`https://${ADVANCED_DOMAIN}`).get(/.*/).query(true).reply(404);
+
+            const result = await checkKey(email);
+
+            assert.strictEqual(result.direct.valid, true, 'Should be valid');
+            assert.strictEqual(result.direct.policyCompliant, true);
+        });
+
+        it('should parse complex policy file correctly', async () => {
+            const email = 'valid@example.localhost';
+            const hash = HASHES[email];
+            const keyBuffer = readKeyFile('valid.bin');
+
+            const policy = `mailbox-only
+                             # Comment
+                             AuTh-submIt
+                             protoCOL-vERSion: 42
+                             unknown-flag
+                             custom-domain_setting: yes`;
+
+            nock(`https://${DOMAIN}`)
+                .get(`/.well-known/openpgpkey/policy`)
+                .reply(200, policy)
+                .get(`/.well-known/openpgpkey/hu/${hash}`).query(true).reply(200, keyBuffer);
+
+            // Advanced fail
+            nock(`https://${ADVANCED_DOMAIN}`).get(/.*/).query(true).reply(404);
+
+            const result = await checkKey(email);
+
+            assert.ok(result.direct.policy);
+            assert.strictEqual(result.direct.policy?.mailboxOnly, true);
+            assert.strictEqual(result.direct.policy?.authSubmit, true);
+            assert.strictEqual(result.direct.policy?.protocolVersion, 42);
+
+            // Check valid.bin fails mailbox-only
+            assert.strictEqual(result.direct.policyCompliant, false);
         });
 
     });
